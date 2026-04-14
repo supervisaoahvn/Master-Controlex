@@ -27,56 +27,95 @@ if not st.session_state.logado:
 # APP
 st.title("📦 Sistema de Inventário")
 
-menu = st.sidebar.selectbox("Menu", ["Dashboard", "Produtos", "Movimentações"])
+menu = st.sidebar.radio(
+    "📂 Menu",
+    ["📊 Dashboard", "📦 Produtos", "🔄 Movimentação"]
+)
 
 conn = conectar()
 cur = conn.cursor()
 
 # DASHBOARD
-if menu == "Dashboard":
+if menu == "📊 Dashboard":
     df = pd.read_sql("SELECT * FROM produtos", conn)
 
-    st.subheader("📊 Estoque Atual")
-    st.dataframe(df)
+    st.subheader("📊 Visão Geral")
 
-    st.bar_chart(df["quantidade"])
+    col1, col2 = st.columns(2)
+
+    col1.metric("📦 Total itens", df["quantidade"].sum())
+
+    if "preco_custo" in df.columns:
+        valor = (df["quantidade"] * df["preco_custo"]).sum()
+        col2.metric("💰 Valor estoque", f"{valor:.2f}")
+
+    st.divider()
+    st.dataframe(df, use_container_width=True)
 
 # PRODUTOS
-elif menu == "Produtos":
-    st.subheader("📦 Cadastro de Produto")
+elif menu == "📦 Produtos":
 
-    nome = st.text_input("Nome")
-    sku = st.text_input("SKU")
-    quantidade = st.number_input("Quantidade", min_value=0)
+    col1, col2 = st.columns([1,2])
 
-    if st.button("Salvar"):
-        cur.execute(
-            "INSERT INTO produtos (nome, sku, quantidade) VALUES (%s,%s,%s)",
-            (nome, sku, quantidade)
-        )
-        conn.commit()
-        st.success("Produto cadastrado")
+    with col1:
+        st.subheader("➕ Novo")
+
+        nome = st.text_input("Nome")
+        sku = st.text_input("SKU")
+        qtd = st.number_input("Qtd", min_value=0)
+
+        if st.button("Salvar"):
+            cur.execute(
+                "INSERT INTO produtos (nome, sku, quantidade) VALUES (%s,%s,%s)",
+                (nome, sku, qtd)
+            )
+            conn.commit()
+            st.success("Produto cadastrado!")
+            st.rerun()
+
+    with col2:
+        st.subheader("📦 Produtos")
+
+        busca = st.text_input("🔍 Buscar")
+
+        query = "SELECT * FROM produtos"
+        if busca:
+            query += f" WHERE nome ILIKE '%{busca}%'"
+        query += " ORDER BY nome"
+
+        df = pd.read_sql(query, conn)
+        st.dataframe(df, use_container_width=True)
 
 # MOVIMENTAÇÃO
-elif menu == "Movimentações":
-    st.subheader("🔄 Entrada / Saída")
+elif menu == "🔄 Movimentação":
 
-    produto_id = st.number_input("ID Produto")
-    tipo = st.selectbox("Tipo", ["entrada", "saida"])
-    quantidade = st.number_input("Quantidade")
+    df = pd.read_sql("SELECT id, nome, quantidade FROM produtos ORDER BY nome", conn)
 
-    if st.button("Registrar"):
-        cur.execute(
-            "INSERT INTO movimentacoes (produto_id, tipo, quantidade) VALUES (%s,%s,%s)",
-            (produto_id, tipo, quantidade)
-        )
+    col1, col2, col3 = st.columns([2,1,1])
 
-        if tipo == "entrada":
-            cur.execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s",
-                        (quantidade, produto_id))
+    produto = col1.selectbox("Produto", df["nome"])
+    qtd = col2.number_input("Qtd", min_value=1)
+    tipo = col3.selectbox("Tipo", ["+", "-"])
+
+    if st.button("Confirmar", use_container_width=True):
+
+        cur.execute("SELECT id, quantidade FROM produtos WHERE nome=%s", (produto,))
+        produto_id, atual = cur.fetchone()
+
+        if tipo == "-" and qtd > atual:
+            st.error("Estoque insuficiente!")
         else:
-            cur.execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s",
-                        (quantidade, produto_id))
+            if tipo == "+":
+                cur.execute(
+                    "UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s",
+                    (qtd, produto_id)
+                )
+            else:
+                cur.execute(
+                    "UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s",
+                    (qtd, produto_id)
+                )
 
-        conn.commit()
-        st.success("Movimentação registrada")
+            conn.commit()
+            st.success("✔ Atualizado")
+            st.rerun()
