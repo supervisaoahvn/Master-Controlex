@@ -2,68 +2,48 @@ import streamlit as st
 from db import conectar
 from auth import login, criar_usuario
 import pandas as pd
-import plotly.express as px
-import io
-from reportlab.platypus import SimpleDocTemplate, Table
-from reportlab.lib.pagesizes import letter
 
-st.set_page_config(page_title="Inventário PRO V11 MAX", layout="wide")
+st.set_page_config(page_title="Inventário PRO V12 HARDENED", layout="wide")
 
 conn = conectar()
 cur = conn.cursor()
 
-# ================= ESTILO =================
-st.markdown("""
-<style>
-.stButton>button {
-    border-radius: 8px;
-    height: 45px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
+# ================= SAFE EXECUTE =================
+def safe_execute(query, params=None, fetch=False):
+    try:
+        cur.execute(query, params or ())
+        if fetch:
+            return cur.fetchall()
+        conn.commit()
+    except Exception as e:
+        st.error(f"Erro SQL: {e}")
+        return None
 
 # ================= LOGIN =================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
+    st.title("🔐 Login")
 
-    aba = st.radio("Acesso", ["Login", "Cadastrar"])
+    user = st.text_input("Usuário")
+    senha = st.text_input("Senha", type="password")
 
-    if aba == "Login":
-        st.title("🔐 Login")
+    if st.button("Entrar"):
+        dados = login(user, senha)
 
-        user = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-
-        if st.button("Entrar"):
-            dados = login(user, senha)
-
-            if dados:
-                st.session_state.logado = True
-                st.session_state.usuario_id = dados["id"]
-                st.session_state.nivel = dados["nivel"]
-                st.session_state.empresa_id = dados["empresa_id"]
-                st.rerun()
-            else:
-                st.error("Usuário ou senha inválidos")
-
-    else:
-        st.title("🆕 Criar Conta")
-
-        user = st.text_input("Novo usuário")
-        senha = st.text_input("Senha", type="password")
-        nivel = st.selectbox("Nível", ["admin", "operador"])
-
-        if st.button("Criar usuário"):
-            criar_usuario(user, senha, nivel, 1)
-            st.success("Usuário criado!")
+        if dados:
+            st.session_state.logado = True
+            st.session_state.usuario_id = dados["id"]
+            st.session_state.nivel = dados["nivel"]
+            st.session_state.empresa_id = dados["empresa_id"]
+            st.rerun()
+        else:
+            st.error("Login inválido")
 
     st.stop()
 
 empresa_id = st.session_state.empresa_id
-nivel = st.session_state.nivel
 
 # ================= MENU =================
 menu = st.sidebar.radio("Menu", [
@@ -72,77 +52,50 @@ menu = st.sidebar.radio("Menu", [
     "Movimentação",
     "Departamentos",
     "Fornecedores",
-    "Usuários",
-    "Relatórios"
+    "Relatórios",
+    "Logout"
 ])
-
-if st.sidebar.button("🚪 Sair"):
-    st.session_state.clear()
-    st.rerun()
 
 # ================= DASHBOARD =================
 if menu == "Dashboard":
 
-    df = pd.read_sql(f"SELECT * FROM produtos WHERE empresa_id = {empresa_id}", conn)
-    mov = pd.read_sql(f"SELECT * FROM movimentacoes WHERE empresa_id = {empresa_id}", conn)
-
-    st.title("📊 Dashboard PRO MAX")
-
-    col1, col2 = st.columns(2)
-    col1.metric("Total Produtos", len(df))
-    col2.metric("Estoque Total", int(df["quantidade"].sum()))
-
-    if not df.empty:
-        fig = px.bar(df, x="nome", y="quantidade", title="Estoque por Produto")
-        st.plotly_chart(fig, use_container_width=True)
-
-    # ranking produtos
-    saidas = mov[mov["tipo"] == "Saída"]
-    if not saidas.empty:
-        ranking = saidas.groupby("produto_id")["quantidade"].sum().reset_index()
-        nomes = pd.read_sql(f"SELECT id, nome FROM produtos WHERE empresa_id = {empresa_id}", conn)
-        ranking = ranking.merge(nomes, left_on="produto_id", right_on="id")
-
-        fig2 = px.bar(ranking, x="nome", y="quantidade", title="Produtos mais consumidos")
-        st.plotly_chart(fig2, use_container_width=True)
-
-    # consumo por departamento
-    dep_rank = pd.read_sql(f"""
-        SELECT d.nome, SUM(m.quantidade) as total
-        FROM movimentacoes m
-        JOIN departamentos d ON d.id = m.departamento_id
-        WHERE m.empresa_id = {empresa_id}
-        GROUP BY d.nome
-        ORDER BY total DESC
+    df = pd.read_sql(f"""
+        SELECT * FROM produtos WHERE empresa_id = {empresa_id}
     """, conn)
 
-    if not dep_rank.empty:
-        fig_dep = px.bar(dep_rank, x="nome", y="total", title="Consumo por Departamento")
-        st.plotly_chart(fig_dep, use_container_width=True)
+    st.title("📊 Dashboard")
+
+    if not df.empty:
+        st.metric("Total Itens", int(df["quantidade"].sum()))
+
+        if "preco_custo" in df.columns:
+            valor = (df["quantidade"] * df["preco_custo"]).sum()
+            st.metric("Valor Estoque", f"{valor:.2f}")
+
+        st.bar_chart(df.set_index("nome")["quantidade"])
 
 # ================= PRODUTOS =================
 elif menu == "Produtos":
 
-    if nivel == "operador":
-        st.warning("Operador não pode cadastrar produtos")
-        st.stop()
-
-    st.subheader("Cadastro de Produtos")
+    st.subheader("Produtos")
 
     nome = st.text_input("Nome")
-    sku = st.text_input("SKU")
+    sku = st.text_input("SKU (único)")
     qtd = st.number_input("Quantidade", min_value=0)
 
     if st.button("Salvar"):
-        cur.execute("""
+        safe_execute("""
             INSERT INTO produtos (nome, sku, quantidade, empresa_id)
             VALUES (%s,%s,%s,%s)
         """, (nome, sku, qtd, empresa_id))
-        conn.commit()
-        st.success("Salvo!")
+
+        st.success("Produto salvo")
         st.rerun()
 
-    df = pd.read_sql(f"SELECT * FROM produtos WHERE empresa_id = {empresa_id}", conn)
+    df = pd.read_sql(f"""
+        SELECT * FROM produtos WHERE empresa_id = {empresa_id}
+    """, conn)
+
     st.dataframe(df)
 
 # ================= MOVIMENTAÇÃO =================
@@ -150,144 +103,117 @@ elif menu == "Movimentação":
 
     tipo = st.radio("Tipo", ["Entrada", "Saída"])
 
-    df = pd.read_sql(f"SELECT id, nome FROM produtos WHERE empresa_id = {empresa_id}", conn)
-    produto = st.selectbox("Produto", df["nome"])
-    qtd = st.number_input("Quantidade", min_value=1)
+    produtos = pd.read_sql(f"""
+        SELECT id, nome FROM produtos WHERE empresa_id = {empresa_id}
+    """, conn)
 
-    deps = pd.read_sql(f"SELECT id, nome FROM departamentos WHERE empresa_id = {empresa_id}", conn)
-    dep_nome = st.selectbox("Departamento", deps["nome"])
-    dep_id = deps[deps["nome"] == dep_nome]["id"].values[0]
+    departamentos = pd.read_sql(f"""
+        SELECT id, nome FROM departamentos WHERE empresa_id = {empresa_id}
+    """, conn)
+
+    produto_nome = st.selectbox("Produto", produtos["nome"])
+    departamento_nome = st.selectbox("Departamento", departamentos["nome"])
+    qtd = st.number_input("Quantidade", min_value=1)
 
     if st.button("Movimentar"):
 
-        cur.execute("SELECT id FROM produtos WHERE nome=%s", (produto,))
-        produto_id = cur.fetchone()[0]
+        try:
+            # produto
+            cur.execute("SELECT id FROM produtos WHERE nome=%s", (produto_nome,))
+            produto_id = cur.fetchone()[0]
 
-        if tipo == "Saída":
-            cur.execute("SELECT quantidade FROM produtos WHERE id=%s", (produto_id,))
-            atual = cur.fetchone()[0]
+            # departamento
+            cur.execute("SELECT id FROM departamentos WHERE nome=%s", (departamento_nome,))
+            departamento_id = cur.fetchone()[0]
 
-            if qtd > atual:
-                st.error("❌ Estoque insuficiente!")
-                st.stop()
+            # INSERT seguro
+            safe_execute("""
+                INSERT INTO movimentacoes 
+                (produto_id, tipo, quantidade, empresa_id, departamento_id, usuario_id)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (
+                produto_id,
+                tipo,
+                qtd,
+                empresa_id,
+                departamento_id,
+                st.session_state.usuario_id
+            ))
 
-        cur.execute("""
-            INSERT INTO movimentacoes 
-            (produto_id, tipo, quantidade, empresa_id, usuario_id, departamento_id)
-            VALUES (%s,%s,%s,%s,%s,%s)
-        """, (produto_id, tipo, qtd, empresa_id, st.session_state.usuario_id, dep_id))
+            # Atualiza estoque
+            if tipo == "Entrada":
+                safe_execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s", (qtd, produto_id))
+            else:
+                safe_execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s", (qtd, produto_id))
 
-        if tipo == "Entrada":
-            cur.execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s", (qtd, produto_id))
-        else:
-            cur.execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s", (qtd, produto_id))
+            st.success("Movimentação registrada")
+            st.rerun()
 
-        conn.commit()
-        st.success("Movimentado!")
-        st.rerun()
+        except Exception as e:
+            st.error(f"Erro movimentação: {e}")
 
 # ================= DEPARTAMENTOS =================
 elif menu == "Departamentos":
 
-    st.subheader("Cadastro de Departamentos")
+    nome = st.text_input("Nome do departamento")
 
-    nome = st.text_input("Nome")
-
-    if st.button("Salvar"):
-        cur.execute("""
+    if st.button("Criar"):
+        safe_execute("""
             INSERT INTO departamentos (nome, empresa_id)
             VALUES (%s,%s)
         """, (nome, empresa_id))
-        conn.commit()
-        st.success("Salvo!")
+        st.success("Criado")
 
-    df = pd.read_sql(f"SELECT * FROM departamentos WHERE empresa_id = {empresa_id}", conn)
+    df = pd.read_sql(f"""
+        SELECT * FROM departamentos WHERE empresa_id = {empresa_id}
+    """, conn)
+
     st.dataframe(df)
 
 # ================= FORNECEDORES =================
 elif menu == "Fornecedores":
 
-    st.subheader("Cadastro de Fornecedores")
-
     nome = st.text_input("Nome")
-    tel = st.text_input("Telefone")
-    end = st.text_input("Endereço")
+    telefone = st.text_input("Telefone")
     doc = st.text_input("CNPJ/CPF")
 
     if st.button("Salvar"):
-        cur.execute("""
-            INSERT INTO fornecedores (nome, telefone, endereco, documento, empresa_id)
-            VALUES (%s,%s,%s,%s,%s)
-        """, (nome, tel, end, doc, empresa_id))
-        conn.commit()
-        st.success("Salvo!")
+        safe_execute("""
+            INSERT INTO fornecedores (nome, telefone, documento, empresa_id)
+            VALUES (%s,%s,%s,%s)
+        """, (nome, telefone, doc, empresa_id))
 
-    df = pd.read_sql(f"SELECT * FROM fornecedores WHERE empresa_id = {empresa_id}", conn)
+        st.success("Fornecedor salvo")
+
+    df = pd.read_sql(f"""
+        SELECT * FROM fornecedores WHERE empresa_id = {empresa_id}
+    """, conn)
+
     st.dataframe(df)
-
-# ================= USUÁRIOS =================
-elif menu == "Usuários":
-
-    if nivel != "admin":
-        st.warning("Apenas admin pode acessar")
-        st.stop()
-
-    st.subheader("Criar Usuário")
-
-    user = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
-    nivel = st.selectbox("Nível", ["admin", "operador"])
-
-    if st.button("Criar"):
-        criar_usuario(user, senha, nivel, empresa_id)
-        st.success("Usuário criado!")
 
 # ================= RELATÓRIOS =================
 elif menu == "Relatórios":
 
-    st.subheader("📊 Relatórios PRO")
+    st.subheader("Relatórios")
 
     df = pd.read_sql(f"""
-        SELECT m.*, p.nome as produto, d.nome as departamento
+        SELECT m.*, p.nome as produto
         FROM movimentacoes m
-        JOIN produtos p ON p.id = m.produto_id
-        LEFT JOIN departamentos d ON d.id = m.departamento_id
+        LEFT JOIN produtos p ON p.id = m.produto_id
         WHERE m.empresa_id = {empresa_id}
-        ORDER BY data DESC
+        ORDER BY m.data DESC
     """, conn)
 
     busca = st.text_input("Buscar produto")
+
     if busca:
         df = df[df["produto"].str.contains(busca, case=False)]
 
-    data_ini = st.date_input("Data inicial")
-    data_fim = st.date_input("Data final")
-
-    if data_ini and data_fim:
-        df = df[(df["data"] >= str(data_ini)) & (df["data"] <= str(data_fim))]
-
     st.dataframe(df)
 
-    st.download_button("⬇️ CSV", df.to_csv(index=False), "relatorio.csv")
+    st.download_button("Baixar CSV", df.to_csv(index=False), "relatorio.csv")
 
-    buffer = io.BytesIO()
-    df.to_excel(buffer, index=False)
-    st.download_button("⬇️ Excel", buffer.getvalue(), "relatorio.xlsx")
-
-    def gerar_pdf(df):
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter)
-        data = [df.columns.tolist()] + df.values.tolist()
-        table = Table(data)
-        doc.build([table])
-        buffer.seek(0)
-        return buffer
-
-    pdf = gerar_pdf(df)
-
-    st.download_button(
-        "📄 Exportar PDF",
-        pdf,
-        file_name="relatorio.pdf",
-        mime="application/pdf"
-    )
+# ================= LOGOUT =================
+elif menu == "Logout":
+    st.session_state.clear()
+    st.rerun()
