@@ -14,25 +14,44 @@ if "logado" not in st.session_state:
 
 if not st.session_state.logado:
 
-    st.title("🔐 Login")
+    aba = st.radio("Acesso", ["Login", "Cadastrar"])
 
-    user = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
+    # LOGIN
+    if aba == "Login":
+        st.title("🔐 Login")
 
-    if st.button("Entrar"):
-        dados = login(user, senha)
+        user = st.text_input("Usuário")
+        senha = st.text_input("Senha", type="password")
 
-        if dados:
-            st.session_state.logado = True
-            st.session_state.usuario_id = dados["id"]
-            st.session_state.nivel = dados["nivel"]
-            st.session_state.empresa_id = dados["empresa_id"]
-            st.rerun()
-        else:
-            st.error("Login inválido")
+        if st.button("Entrar"):
+            dados = login(user, senha)
+
+            if dados:
+                st.session_state.logado = True
+                st.session_state.usuario_id = dados["id"]
+                st.session_state.nivel = dados["nivel"]
+                st.session_state.empresa_id = dados["empresa_id"]
+
+                st.success("Login realizado!")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha inválidos")
+
+    # CADASTRO
+    else:
+        st.title("🆕 Criar Conta")
+
+        user = st.text_input("Novo usuário")
+        senha = st.text_input("Senha", type="password")
+        nivel = st.selectbox("Nível", ["admin", "operador"])
+
+        if st.button("Criar usuário"):
+            criar_usuario(user, senha, nivel, 1)
+            st.success("Usuário criado!")
 
     st.stop()
 
+# ================= APP =================
 empresa_id = st.session_state.empresa_id
 
 # ================= MENU =================
@@ -42,6 +61,11 @@ menu = st.sidebar.radio("Menu", [
     "Movimentação",
     "Usuários"
 ])
+
+# LOGOUT (fica sempre visível)
+if st.sidebar.button("🚪 Sair"):
+    st.session_state.clear()
+    st.rerun()
 
 # ================= DASHBOARD =================
 if menu == "Dashboard":
@@ -61,7 +85,8 @@ if menu == "Dashboard":
         valor = (df["quantidade"] * df["preco_custo"]).sum()
         col2.metric("Valor Estoque", f"{valor:.2f}")
 
-    st.bar_chart(df.set_index("nome")["quantidade"])
+    if not df.empty:
+        st.bar_chart(df.set_index("nome")["quantidade"])
 
 
 # ================= PRODUTOS =================
