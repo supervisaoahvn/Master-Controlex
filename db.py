@@ -1,5 +1,7 @@
 import psycopg2
-import streamlit as st
+import os
 
 def conectar():
-    return psycopg2.connect(st.secrets["DATABASE_URL"])
+    return psycopg2.connect(
+        os.environ["DATABASE_URL"]
+    )

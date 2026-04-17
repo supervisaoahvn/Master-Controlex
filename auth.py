@@ -1,39 +1,41 @@
-from db import conectar
 import bcrypt
+from db import conectar
 
-def criar_usuario(username, senha, empresa_id):
+def criar_usuario(usuario, senha, empresa_id):
     conn = conectar()
     cur = conn.cursor()
 
     senha_hash = bcrypt.hashpw(senha.encode(), bcrypt.gensalt()).decode()
 
     cur.execute("""
-        INSERT INTO usuarios (username, senha, empresa_id)
+        INSERT INTO usuarios (usuario, senha, empresa_id)
         VALUES (%s, %s, %s)
-    """, (username, senha_hash, empresa_id))
+    """, (usuario, senha_hash, empresa_id))
 
     conn.commit()
+    conn.close()
 
 
-def login(username, senha):
+def login(usuario, senha):
     conn = conectar()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, senha, empresa_id
-        FROM usuarios
-        WHERE username=%s
-    """, (username,))
+        SELECT id, senha, empresa_id 
+        FROM usuarios 
+        WHERE usuario=%s
+    """, (usuario,))
 
     user = cur.fetchone()
+    conn.close()
 
     if user:
-        senha_hash = user[1].encode()
+        user_id, senha_hash, empresa_id = user
 
-        if bcrypt.checkpw(senha.encode(), senha_hash):
+        if bcrypt.checkpw(senha.encode(), senha_hash.encode()):
             return {
-                "user_id": user[0],
-                "empresa_id": user[2]
+                "user_id": user_id,
+                "empresa_id": empresa_id
             }
 
     return None
