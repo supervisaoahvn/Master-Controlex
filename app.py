@@ -44,7 +44,6 @@ menu = st.sidebar.radio("Menu", [
     "Solicitações",
     "Relatórios"
 ])
-])
 
 if menu == "Dashboard":
     dashboard.render(conn, empresa_id)
