@@ -1,12 +1,21 @@
 from db import conectar
 
-def login(user, senha):
+def login(username, senha):
     conn = conectar()
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT * FROM usuarios WHERE username=%s AND senha=%s",
-        (user, senha)
-    )
+    cur.execute("""
+        SELECT id, empresa_id 
+        FROM usuarios 
+        WHERE username=%s AND senha=%s
+    """, (username, senha))
 
-    return cur.fetchone()
+    user = cur.fetchone()
+
+    if user:
+        return {
+            "user_id": user[0],
+            "empresa_id": user[1]
+        }
+
+    return None
