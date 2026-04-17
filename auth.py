@@ -13,24 +13,17 @@ def login(usuario, senha):
 
     cur.execute("""
         SELECT id, senha, nivel, empresa_id 
-        FROM usuarios 
-        WHERE usuario=%s
+        FROM usuarios WHERE usuario=%s
     """, (usuario,))
 
     user = cur.fetchone()
 
     if user:
-        user_id, senha_hash, nivel, empresa_id = user
-
+        uid, senha_hash, nivel, empresa_id = user
         if verificar_senha(senha, senha_hash):
-            return {
-                "id": user_id,
-                "nivel": nivel,
-                "empresa_id": empresa_id
-            }
+            return {"id": uid, "nivel": nivel, "empresa_id": empresa_id}
 
     return None
-
 
 def criar_usuario(usuario, senha, nivel, empresa_id):
     conn = conectar()
@@ -40,7 +33,7 @@ def criar_usuario(usuario, senha, nivel, empresa_id):
 
     cur.execute("""
         INSERT INTO usuarios (usuario, senha, nivel, empresa_id)
-        VALUES (%s, %s, %s, %s)
+        VALUES (%s,%s,%s,%s)
     """, (usuario, senha_hash, nivel, empresa_id))
 
     conn.commit()

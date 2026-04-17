@@ -1,0 +1,24 @@
+project/ OK
+│
+├── app.py OK
+├── db.py OK
+├── auth.py OK
+├── requirements.txt OK
+│
+├── styles/ OK
+│   ├── base.css OK
+│   ├── dashboard.css OK
+│
+├── modules/ OK
+│   ├── dashboard.py OK
+│   ├── produtos.py OK
+│   ├── movimentacao.py OK
+│   ├── departamentos.py  OK
+│   ├── fornecedores.py OK
+│   ├── relatorios.py OK
+│   ├── solicitacoes.py OK
+│
+└── utils/ OK
+    ├── permissions.py OK
+    ├── alerts.py OK
+    ├── previsao.py OK
