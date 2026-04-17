@@ -1,6 +1,6 @@
 import streamlit as st
 from db import conectar
-from auth import login
+from auth import criar_usuario, login
 from modules import (
     dashboard,
     produtos,
@@ -16,21 +16,46 @@ conn = conectar()
 cur = conn.cursor()
 
 # LOGIN
+# ================= LOGIN =================
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    user = st.text_input("User")
-    senha = st.text_input("Senha", type="password")
 
-    if st.button("Entrar"):
-        dados = login(user, senha)
-        if dados:
-            st.session_state.logado = True
-            st.session_state.usuario_id = dados["id"]
-            st.session_state.empresa_id = dados["empresa_id"]
-            st.rerun()
-    st.stop()
+    aba = st.radio("Acesso", ["Login", "Cadastrar"])
+
+    if aba == "Login":
+        st.title("🔐 Login")
+
+        user = st.text_input("Usuário")
+        senha = st.text_input("Senha", type="password")
+
+        if st.button("Entrar"):
+            dados = login(user, senha)
+
+            if dados:
+                st.session_state.logado = True
+                st.session_state.usuario_id = dados["id"]
+                st.session_state.nivel = dados["nivel"]
+                st.session_state.empresa_id = dados["empresa_id"]
+
+                st.success("Login OK")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha inválidos")
+
+    else:
+        st.title("🆕 Criar Conta")
+
+        user = st.text_input("Novo usuário")
+        senha = st.text_input("Senha", type="password")
+        nivel = st.selectbox("Nível", ["admin", "operador"])
+
+        if st.button("Criar usuário"):
+            criar_usuario(user, senha, nivel, 1)
+            st.success("Usuário criado!")
+
+    st.stop()  # 🔥 ESSA LINHA É CRÍTICA
 
 empresa_id = st.session_state.empresa_id
 user_id = st.session_state.usuario_id
