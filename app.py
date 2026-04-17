@@ -1,9 +1,3 @@
-def load_css(file):
-    with open(file) as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-load_css("styles/base.css")
-load_css("styles/dashboard.css")
 import streamlit as st
 from db import conectar
 from auth import criar_usuario, login
@@ -21,7 +15,13 @@ st.set_page_config(layout="wide")
 conn = conectar()
 cur = conn.cursor()
 
-# LOGIN
+def load_css(file):
+    with open(file) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+load_css("styles/base.css")
+load_css("styles/dashboard.css")
+
 # ================= LOGIN =================
 if "logado" not in st.session_state:
     st.session_state.logado = False
