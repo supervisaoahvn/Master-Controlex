@@ -3,9 +3,9 @@ from db import conectar
 from auth import login
 import pandas as pd
 
-st.set_page_config(page_title="Inventário PRO", layout="wide")
+st.set_page_config(page_title="Inventário PRO 4.0", layout="wide")
 
-# ================= LOGIN =================
+# LOGIN
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
@@ -24,252 +24,135 @@ if not st.session_state.logado:
 
     st.stop()
 
-# ================= APP =================
-st.title("📦 Sistema de Inventário")
+# APP
+st.title("📦 Inventário PRO 4.0")
 
 menu = st.sidebar.radio(
-    "📂 Menu",
-    [
-        "📊 Dashboard",
-        "📦 Produtos",
-        "🔄 Movimentação",
-        "🏢 Departamentos",
-        "🚚 Fornecedores",
-        "👤 Funcionários"
-    ]
+    "Menu",
+    ["Dashboard", "Produtos", "Movimentação", "Relatórios"]
 )
 
 conn = conectar()
 cur = conn.cursor()
 
 # ================= DASHBOARD =================
-if menu == "📊 Dashboard":
+if menu == "Dashboard":
 
     df = pd.read_sql("SELECT * FROM produtos", conn)
 
-    st.subheader("📊 Visão Geral")
-
     col1, col2 = st.columns(2)
 
-    col1.metric("📦 Total itens", int(df["quantidade"].sum()))
+    col1.metric("Itens em estoque", int(df["quantidade"].sum()))
 
-    if "preco_custo" in df.columns:
-        valor = (df["quantidade"] * df["preco_custo"]).sum()
-        col2.metric("💰 Valor estoque", f"{valor:.2f}")
+    valor = (df["quantidade"] * df["preco_custo"]).sum()
+    col2.metric("Valor total", f"R$ {valor:.2f}")
 
-    st.divider()
-    st.dataframe(df, use_container_width=True)
+    st.subheader("📊 Estoque por Produto")
+    st.bar_chart(df.set_index("nome")["quantidade"])
+
+    # ALERTA
+    baixo = df[df["quantidade"] <= df["estoque_minimo"]]
+
+    if not baixo.empty:
+        st.error("⚠ Estoque baixo")
+        st.dataframe(baixo)
 
 
 # ================= PRODUTOS =================
-elif menu == "📦 Produtos":
+elif menu == "Produtos":
 
-    col1, col2 = st.columns([1, 2])
+    st.subheader("Cadastro")
 
-    with col1:
-        st.subheader("➕ Novo Produto")
+    nome = st.text_input("Nome")
+    sku = st.text_input("SKU")
+    qtd = st.number_input("Quantidade", 0)
+    custo = st.number_input("Preço custo", 0.0)
+    minimo = st.number_input("Estoque mínimo", 0)
 
-        nome = st.text_input("Nome")
-        sku = st.text_input("SKU")
-        qtd = st.number_input("Quantidade", min_value=0)
+    forn_df = pd.read_sql("SELECT nome FROM fornecedores", conn)
 
-        forn_df = pd.read_sql("SELECT id, nome FROM fornecedores", conn)
-
-        if forn_df.empty:
-            st.warning("Cadastre um fornecedor primeiro!")
-            st.stop()
-
+    if not forn_df.empty:
         fornecedor = st.selectbox("Fornecedor", forn_df["nome"])
 
-        if st.button("Salvar produto"):
+    if st.button("Salvar"):
 
-            # evitar duplicado
-            cur.execute("SELECT id FROM produtos WHERE sku=%s", (sku,))
-            if cur.fetchone():
-                st.error("SKU já existe!")
-                st.stop()
+        cur.execute("SELECT id FROM produtos WHERE sku=%s", (sku,))
+        if cur.fetchone():
+            st.error("SKU já existe")
+            st.stop()
 
-            cur.execute("SELECT id FROM fornecedores WHERE nome=%s", (fornecedor,))
-            fornecedor_row = cur.fetchone()
+        cur.execute("SELECT id FROM fornecedores WHERE nome=%s", (fornecedor,))
+        fornecedor_id = cur.fetchone()[0]
 
-            if not fornecedor_row:
-                st.error("Fornecedor inválido")
-                st.stop()
+        cur.execute("""
+            INSERT INTO produtos (nome, sku, quantidade, preco_custo, estoque_minimo, fornecedor_id)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """, (nome, sku, qtd, custo, minimo, fornecedor_id))
 
-            fornecedor_id = fornecedor_row[0]
+        conn.commit()
+        st.success("Salvo")
+        st.rerun()
 
-            cur.execute(
-                "INSERT INTO produtos (nome, sku, quantidade, fornecedor_id) VALUES (%s,%s,%s,%s)",
-                (nome, sku, qtd, fornecedor_id)
-            )
-            conn.commit()
+    st.divider()
 
-            st.success("Produto cadastrado!")
-            st.rerun()
-
-    with col2:
-        st.subheader("📦 Lista de Produtos")
-
-        busca = st.text_input("🔍 Buscar produto")
-
-        query = "SELECT * FROM produtos"
-        if busca:
-            query += f" WHERE nome ILIKE '%{busca}%'"
-        query += " ORDER BY nome"
-
-        df = pd.read_sql(query, conn)
-        st.dataframe(df, use_container_width=True)
+    df = pd.read_sql("SELECT * FROM produtos", conn)
+    st.dataframe(df)
 
 
 # ================= MOVIMENTAÇÃO =================
-elif menu == "🔄 Movimentação":
+elif menu == "Movimentação":
 
     tipo = st.radio("Tipo", ["Entrada", "Saída"])
 
-    prod_df = pd.read_sql("SELECT id, nome, quantidade FROM produtos ORDER BY nome", conn)
+    df = pd.read_sql("SELECT id, nome, quantidade FROM produtos", conn)
+    produto = st.selectbox("Produto", df["nome"])
 
-    if prod_df.empty:
-        st.warning("Cadastre produtos primeiro!")
-        st.stop()
+    qtd = st.number_input("Quantidade", 1)
 
-    produto = st.selectbox("Produto", prod_df["nome"])
-    qtd = st.number_input("Quantidade", min_value=1)
+    if st.button("Registrar"):
 
-    fornecedor = None
-    departamento = None
-    funcionario = None
-
-    if tipo == "Entrada":
-        forn_df = pd.read_sql("SELECT id, nome FROM fornecedores", conn)
-        fornecedor = st.selectbox("Fornecedor", forn_df["nome"])
-
-    else:
-        dep_df = pd.read_sql("SELECT id, nome FROM departamentos", conn)
-        func_df = pd.read_sql("SELECT id, nome FROM funcionarios", conn)
-
-        departamento = st.selectbox("Departamento", dep_df["nome"])
-        funcionario = st.selectbox("Funcionário", func_df["nome"])
-
-    if st.button("Registrar movimentação"):
-
-        # produto
         cur.execute("SELECT id, quantidade FROM produtos WHERE nome=%s", (produto,))
-        row = cur.fetchone()
+        produto_id, estoque = cur.fetchone()
 
-        if not row:
-            st.error("Produto não encontrado")
+        if tipo == "Saída" and qtd > estoque:
+            st.error("Sem estoque")
             st.stop()
 
-        produto_id, estoque_atual = row
-
-        fornecedor_id = None
-        departamento_id = None
-        funcionario_id = None
-
-        # ENTRADA
         if tipo == "Entrada":
-            cur.execute("SELECT id FROM fornecedores WHERE nome=%s", (fornecedor,))
-            fornecedor_id = cur.fetchone()[0]
-
-            cur.execute("""
-                UPDATE produtos
-                SET quantidade = quantidade + %s
-                WHERE id = %s
-            """, (qtd, produto_id))
-
-        # SAÍDA
+            cur.execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s", (qtd, produto_id))
         else:
-            if qtd > estoque_atual:
-                st.error("Estoque insuficiente!")
-                st.stop()
+            cur.execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s", (qtd, produto_id))
 
-            cur.execute("SELECT id FROM departamentos WHERE nome=%s", (departamento,))
-            departamento_id = cur.fetchone()[0]
-
-            cur.execute("SELECT id FROM funcionarios WHERE nome=%s", (funcionario,))
-            funcionario_id = cur.fetchone()[0]
-
-            cur.execute("""
-                UPDATE produtos
-                SET quantidade = quantidade - %s
-                WHERE id = %s
-            """, (qtd, produto_id))
-
-        # REGISTRO
         cur.execute("""
-            INSERT INTO movimentacoes 
-            (produto_id, tipo, quantidade, fornecedor_id, departamento_id, funcionario_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (produto_id, tipo, qtd, fornecedor_id, departamento_id, funcionario_id))
+            INSERT INTO movimentacoes (produto_id, tipo, quantidade)
+            VALUES (%s,%s,%s)
+        """, (produto_id, tipo, qtd))
 
         conn.commit()
-
-        st.success("Movimentação registrada!")
+        st.success("OK")
         st.rerun()
 
 
-# ================= DEPARTAMENTOS =================
-elif menu == "🏢 Departamentos":
+# ================= RELATÓRIOS =================
+elif menu == "Relatórios":
 
-    st.subheader("Cadastrar Departamento")
+    st.subheader("📊 Consumo")
 
-    nome = st.text_input("Nome do departamento")
+    df = pd.read_sql("""
+        SELECT tipo, SUM(quantidade) as total
+        FROM movimentacoes
+        GROUP BY tipo
+    """, conn)
 
-    if st.button("Salvar departamento"):
-        cur.execute("INSERT INTO departamentos (nome) VALUES (%s)", (nome,))
-        conn.commit()
-        st.success("Departamento cadastrado!")
-        st.rerun()
-
-    df = pd.read_sql("SELECT * FROM departamentos", conn)
     st.dataframe(df)
+    st.bar_chart(df.set_index("tipo"))
 
+    # EXPORTAR CSV
+    csv = df.to_csv(index=False).encode("utf-8")
 
-# ================= FORNECEDORES =================
-elif menu == "🚚 Fornecedores":
-
-    st.subheader("Cadastrar Fornecedor")
-
-    nome = st.text_input("Nome do fornecedor")
-
-    if st.button("Salvar fornecedor"):
-        cur.execute("INSERT INTO fornecedores (nome) VALUES (%s)", (nome,))
-        conn.commit()
-        st.success("Fornecedor cadastrado!")
-        st.rerun()
-
-    df = pd.read_sql("SELECT * FROM fornecedores", conn)
-    st.dataframe(df)
-
-
-# ================= FUNCIONÁRIOS =================
-elif menu == "👤 Funcionários":
-
-    st.subheader("Cadastrar Funcionário")
-
-    nome = st.text_input("Nome")
-
-    dep_df = pd.read_sql("SELECT id, nome FROM departamentos", conn)
-
-    if dep_df.empty:
-        st.warning("Cadastre departamentos primeiro!")
-        st.stop()
-
-    departamento = st.selectbox("Departamento", dep_df["nome"])
-
-    if st.button("Salvar funcionário"):
-
-        cur.execute("SELECT id FROM departamentos WHERE nome=%s", (departamento,))
-        departamento_id = cur.fetchone()[0]
-
-        cur.execute(
-            "INSERT INTO funcionarios (nome, departamento_id) VALUES (%s,%s)",
-            (nome, departamento_id)
-        )
-
-        conn.commit()
-        st.success("Funcionário cadastrado!")
-        st.rerun()
-
-    df = pd.read_sql("SELECT * FROM funcionarios", conn)
-    st.dataframe(df)
+    st.download_button(
+        label="📥 Baixar CSV",
+        data=csv,
+        file_name="relatorio.csv",
+        mime="text/csv"
+    )
