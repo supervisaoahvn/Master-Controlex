@@ -3,5 +3,6 @@ import os
 
 def conectar():
     return psycopg2.connect(
-        os.environ["DATABASE_URL"]
+        os.getenv("DATABASE_URL"),
+        sslmode="require"
     )
