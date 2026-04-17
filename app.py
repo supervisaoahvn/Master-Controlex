@@ -2,12 +2,21 @@ import streamlit as st
 from db import conectar
 from auth import login, criar_usuario
 import pandas as pd
+import plotly.express as px
 
 st.set_page_config(page_title="Inventário PRO V9", layout="wide")
 
 conn = conectar()
 cur = conn.cursor()
-
+st.markdown("""
+<style>
+.stButton>button {
+    border-radius: 8px;
+    height: 45px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
 # ================= LOGIN =================
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -59,7 +68,8 @@ menu = st.sidebar.radio("Menu", [
     "Dashboard",
     "Produtos",
     "Movimentação",
-    "Usuários"
+    "Usuários",
+    "Relatórios",
 ])
 
 # LOGOUT (fica sempre visível)
@@ -68,6 +78,7 @@ if st.sidebar.button("🚪 Sair"):
     st.rerun()
 
 # ================= DASHBOARD =================
+
 if menu == "Dashboard":
 
     df = pd.read_sql(f"""
@@ -75,18 +86,36 @@ if menu == "Dashboard":
         WHERE empresa_id = {empresa_id}
     """, conn)
 
-    st.subheader("📊 Dashboard")
+    mov = pd.read_sql(f"""
+        SELECT * FROM movimentacoes
+        WHERE empresa_id = {empresa_id}
+    """, conn)
+
+    st.subheader("📊 Dashboard PRO")
 
     col1, col2 = st.columns(2)
 
-    col1.metric("Total Itens", int(df["quantidade"].sum()))
+    col1.metric("Total Produtos", len(df))
+    col2.metric("Estoque Total", int(df["quantidade"].sum()))
 
-    if "preco_custo" in df.columns:
-        valor = (df["quantidade"] * df["preco_custo"]).sum()
-        col2.metric("Valor Estoque", f"{valor:.2f}")
-
+    # 🔥 gráfico estoque
     if not df.empty:
-        st.bar_chart(df.set_index("nome")["quantidade"])
+        fig = px.bar(df, x="nome", y="quantidade", title="Estoque por Produto")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # 🔥 ranking consumo
+    saidas = mov[mov["tipo"] == "Saída"]
+
+    if not saidas.empty:
+        ranking = saidas.groupby("produto_id")["quantidade"].sum().reset_index()
+
+        nomes = pd.read_sql(f"""
+    SELECT id, nome FROM produtos WHERE empresa_id = {empresa_id}
+""", conn)
+        ranking = ranking.merge(nomes, left_on="produto_id", right_on="id")
+
+        fig2 = px.bar(ranking, x="nome", y="quantidade", title="Produtos mais consumidos")
+        st.plotly_chart(fig2, use_container_width=True)
 
 
 # ================= PRODUTOS =================
@@ -128,25 +157,35 @@ elif menu == "Movimentação":
     produto = st.selectbox("Produto", df["nome"])
     qtd = st.number_input("Quantidade", min_value=1)
 
-    if st.button("Movimentar"):
+if st.button("Movimentar"):
 
-        cur.execute("SELECT id FROM produtos WHERE nome=%s", (produto,))
-        produto_id = cur.fetchone()[0]
+    cur.execute("SELECT id FROM produtos WHERE nome=%s", (produto,))
+    produto_id = cur.fetchone()[0]
 
-        cur.execute("""
-            INSERT INTO movimentacoes (produto_id, tipo, quantidade, empresa_id)
-            VALUES (%s,%s,%s,%s)
-        """, (produto_id, tipo, qtd, empresa_id))
+    # 🔥 valida estoque
+    if tipo == "Saída":
+        cur.execute("SELECT quantidade FROM produtos WHERE id=%s", (produto_id,))
+        atual = cur.fetchone()[0]
 
-        if tipo == "Entrada":
-            cur.execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s", (qtd, produto_id))
-        else:
-            cur.execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s", (qtd, produto_id))
+        if qtd > atual:
+            st.error("❌ Estoque insuficiente!")
+            st.stop()
 
-        conn.commit()
-        st.success("Movimentado!")
-        st.rerun()
+    # 🔥 registra movimentação
+    cur.execute("""
+        INSERT INTO movimentacoes (produto_id, tipo, quantidade, empresa_id)
+        VALUES (%s,%s,%s,%s)
+    """, (produto_id, tipo, qtd, empresa_id))
 
+    # 🔥 atualiza estoque
+    if tipo == "Entrada":
+        cur.execute("UPDATE produtos SET quantidade = quantidade + %s WHERE id=%s", (qtd, produto_id))
+    else:
+        cur.execute("UPDATE produtos SET quantidade = quantidade - %s WHERE id=%s", (qtd, produto_id))
+
+    conn.commit()
+    st.success("Movimentado!")
+    st.rerun()
 
 # ================= USUÁRIOS =================
 elif menu == "Usuários":
@@ -164,3 +203,28 @@ elif menu == "Usuários":
     if st.button("Criar"):
         criar_usuario(user, senha, nivel, empresa_id)
         st.success("Usuário criado!")
+
+# ================= RELATORIOS =================
+elif menu == "Relatórios":
+
+    df = pd.read_sql(f"""
+        SELECT m.*, p.nome as produto
+        FROM movimentacoes m
+        JOIN produtos p ON p.id = m.produto_id
+        WHERE m.empresa_id = {empresa_id}
+        ORDER BY data DESC
+    """, conn)
+
+    st.subheader("📈 Relatórios")
+
+    st.dataframe(df, use_container_width=True)
+
+    # CSV
+    csv = df.to_csv(index=False).encode()
+    st.download_button("📥 Baixar CSV", csv, "relatorio.csv")
+
+    # EXCEL (correto em memória)
+    from io import BytesIO
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    st.download_button("📥 Baixar Excel", buffer.getvalue(), "relatorio.xlsx")
