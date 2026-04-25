@@ -8,7 +8,8 @@ from modules import (
     departamentos,
     fornecedores,
     relatorios,
-    solicitacoes
+    solicitacoes,
+    ordens
 )
 st.set_page_config(layout="wide")
 
@@ -73,7 +74,9 @@ menu = st.sidebar.radio("Menu", [
     "Departamentos",
     "Fornecedores",
     "Solicitações",
-    "Relatórios"
+    "Relatórios",
+    "Ordens"
+
 ])
 
 if menu == "Dashboard":
@@ -96,3 +99,6 @@ elif menu == "Solicitações":
 
 elif menu == "Relatórios":
     relatorios.render(conn, empresa_id)
+
+elif menu == "Ordens":
+    ordens.render(conn, empresa_id)
