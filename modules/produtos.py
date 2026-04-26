@@ -27,10 +27,8 @@ def render(conn, cur, empresa_id):
     # ========================
     # CARREGAR DADOS
     # ========================
-    df = pd.read_sql(
-        f"SELECT * FROM produtos WHERE empresa_id={empresa_id}",
-        conn
-    )
+    df = pd.read_sql("SELECT * FROM produtos", conn)
+    st.write(df)
 
     # ========================
     # ALERTA DE ESTOQUE BAIXO
